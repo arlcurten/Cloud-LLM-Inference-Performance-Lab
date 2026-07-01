@@ -1,0 +1,11 @@
+model_id: google/gemma-3-1b-it
+model_dir: models/google/gemma-3-1b-it
+device: cuda
+dtype: float16
+prompt: "Explain the difference between supervised and unsupervised learning in machine learning."
+max_new_tokens: 100
+warmup_iterations: 3
+measurement_iterations: 10
+batch_size: 1
+do_sample: false
+seed: 42

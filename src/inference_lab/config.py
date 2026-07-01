@@ -15,6 +15,10 @@ class InferenceConfig:
     seed: int = 42
     # If set, model is downloaded to this local path instead of the HF cache
     model_dir: Optional[str] = None
+    # Benchmark-specific fields (optional; not used by smoke inference)
+    warmup_iterations: Optional[int] = None
+    measurement_iterations: Optional[int] = None
+    batch_size: int = 1
 
 
 def load_config(path: str | Path) -> InferenceConfig:
