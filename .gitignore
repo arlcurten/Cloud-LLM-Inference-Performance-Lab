@@ -216,3 +216,17 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Hugging Face model cache and tokens
+~/.cache/huggingface/
+.huggingface/
+*.token
+
+# Local model downloads
+models/
+
+# Project results (large generated files)
+results/raw/*
+results/plots/*
+!results/raw/.gitkeep
+!results/plots/.gitkeep

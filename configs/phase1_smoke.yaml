@@ -1,0 +1,8 @@
+model_id: google/gemma-3-1b-it
+model_dir: models/google/gemma-3-1b-it
+device: cuda
+dtype: float16
+prompt: "What is the capital of France?"
+max_new_tokens: 32
+do_sample: false
+seed: 42
