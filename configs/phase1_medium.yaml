@@ -1,0 +1,12 @@
+# Medium workload: ~117 input tokens, 64 requested output tokens
+model_id: google/gemma-3-1b-it
+model_dir: models/google/gemma-3-1b-it
+device: cuda
+dtype: float16
+prompt: "You are a helpful AI assistant specializing in machine learning and data science. A junior data scientist is working on their first fraud detection project. They have a dataset of fifty thousand labeled bank transactions, where ninety-five percent are legitimate and five percent are fraudulent. After training a logistic regression classifier, they report ninety-five percent accuracy to their manager, who responds that the model is useless despite the high accuracy score. Explain why accuracy is a misleading metric for this problem, which evaluation metrics they should use instead, and describe two practical strategies to address the class imbalance in the training data."
+max_new_tokens: 64
+warmup_iterations: 3
+measurement_iterations: 10
+batch_size: 1
+do_sample: false
+seed: 42

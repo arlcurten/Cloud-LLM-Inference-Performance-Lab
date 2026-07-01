@@ -227,6 +227,8 @@ models/
 
 # Project results (large generated files)
 results/raw/*
+results/processed/*
 results/plots/*
 !results/raw/.gitkeep
+!results/processed/.gitkeep
 !results/plots/.gitkeep

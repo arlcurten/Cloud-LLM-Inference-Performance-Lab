@@ -1,0 +1,12 @@
+# Short workload: ~30 input tokens, 32 requested output tokens
+model_id: google/gemma-3-1b-it
+model_dir: models/google/gemma-3-1b-it
+device: cuda
+dtype: float16
+prompt: "Describe the concept of overfitting in machine learning. What causes it, and name two common regularization techniques used to prevent it. Keep your answer concise."
+max_new_tokens: 32
+warmup_iterations: 3
+measurement_iterations: 10
+batch_size: 1
+do_sample: false
+seed: 42

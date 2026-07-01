@@ -1,4 +1,4 @@
-"""Run a prefill/decode benchmark and write timestamped JSON results."""
+"""Run a prefill/decode benchmark and write a timestamped JSON result file."""
 import argparse
 import json
 import sys
@@ -20,27 +20,27 @@ def _print_summary(summary: dict, n_iters: int) -> None:
     def row(label, key, unit="ms"):
         s = summary[key]
         print(
-            f"  {label:<30} mean={s['mean']:>8.2f}  median={s['median']:>8.2f}"
+            f"  {label:<32} mean={s['mean']:>8.2f}  median={s['median']:>8.2f}"
             f"  p95={s['p95']:>8.2f}  min={s['min']:>8.2f}  max={s['max']:>8.2f}  [{unit}]"
         )
 
-    print(f"\n{'='*70}")
+    print(f"\n{'='*74}")
     print(f"  Benchmark Summary  ({n_iters} measured iterations)")
-    print(f"{'='*70}")
-    print(f"  Input tokens     : {summary['input_token_count']}")
-    print(f"  Generated tokens : {summary['generated_token_count']}")
+    print(f"{'='*74}")
+    print(f"  Input tokens           : {summary['input_tokens']}")
+    print(f"  Generated tokens (mean): {summary['generated_tokens']['mean']:.1f}")
     print()
     row("Prefill latency", "prefill_latency_ms")
     row("Decode total latency", "decode_total_latency_ms")
-    row("Decode mean step latency", "decode_mean_token_latency_ms")
-    row("Decode median step latency", "decode_median_token_latency_ms")
-    row("Decode P95 step latency", "decode_p95_token_latency_ms")
+    row("Mean decode step latency", "mean_decode_token_latency_ms")
+    row("Median decode step latency", "median_decode_token_latency_ms")
+    row("P95 decode step latency", "p95_decode_token_latency_ms")
     row("Decode tokens/s", "decode_tokens_per_second", unit="tok/s")
     row("E2E latency", "e2e_latency_ms")
     print()
-    row("Peak CUDA allocated", "peak_allocated_mb", unit="MB")
-    row("Peak CUDA reserved", "peak_reserved_mb", unit="MB")
-    print(f"{'='*70}\n")
+    row("Peak CUDA allocated", "peak_cuda_allocated_mb", unit="MB")
+    row("Peak CUDA reserved", "peak_cuda_reserved_mb", unit="MB")
+    print(f"{'='*74}\n")
 
 
 def main():
@@ -62,7 +62,9 @@ def main():
     if cfg.seed is not None:
         torch.manual_seed(cfg.seed)
 
-    print(f"Loading model: {cfg.model_id}")
+    experiment_name = Path(args.config).stem
+    print(f"Experiment    : {experiment_name}")
+    print(f"Loading model : {cfg.model_id}")
     tokenizer, model = load_model_and_tokenizer(cfg)
 
     print(f"Running {cfg.warmup_iterations} warm-up iteration(s)...")
@@ -78,6 +80,7 @@ def main():
     result_doc = {
         "metadata": {
             "timestamp": datetime.now(timezone.utc).isoformat(),
+            "experiment_name": experiment_name,
             "git_commit": sysinfo["git_commit"],
             "model_id": cfg.model_id,
             "dtype": cfg.dtype,
@@ -103,7 +106,7 @@ def main():
 
     out_dir = Path("results/raw")
     out_dir.mkdir(parents=True, exist_ok=True)
-    out_path = out_dir / f"benchmark_{timestamp}.json"
+    out_path = out_dir / f"benchmark_{experiment_name}_{timestamp}.json"
     out_path.write_text(json.dumps(result_doc, indent=2))
     print(f"Results saved to: {out_path}")
 

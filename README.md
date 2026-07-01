@@ -5,6 +5,9 @@ A personal study project for learning and benchmarking local LLM inference on co
 **Hardware:** NVIDIA GeForce RTX 3050 Laptop GPU (4 GB VRAM)  
 **Primary model:** `google/gemma-3-1b-it`
 
+> **Note:** Results from this laptop GPU validate the benchmark workflow and methodology.
+> They do not represent production cloud-inference capacity.
+
 ---
 
 ## Phase 1 Scope
@@ -13,7 +16,7 @@ A personal study project for learning and benchmarking local LLM inference on co
 - Run a single deterministic generation (smoke test)
 - Verify GPU memory usage fits within 4 GB VRAM
 - Measure prefill and decode latency manually with CUDA event timing
-- Collect repeatable per-iteration metrics and aggregate statistics
+- Collect repeatable per-iteration metrics and aggregate statistics across three workloads
 
 ---
 
@@ -77,40 +80,88 @@ CUDA reserved    : 1946.0 MB
 python scripts/run_benchmark.py --config configs/phase1_baseline.yaml
 ```
 
-Results are written to `results/raw/benchmark_<timestamp>.json`.
+Results are written to `results/raw/benchmark_<experiment>_<timestamp>.json`.
 
-### What the benchmark measures
+### Metric definitions
 
-**Prefill** — one full forward pass over the entire prompt with `use_cache=True`.  
-The next token is selected by greedy argmax of the last-position logits.
+**Prefill latency** — time (ms) for one full forward pass over the entire prompt
+with `use_cache=True`. Includes KV cache construction for the input sequence.
 
-**Decode** — one forward pass per token, feeding a single token and the KV cache
-from the previous step. Each step is timed independently.
+**Decode token latency** — time (ms) per individual token generation step during
+the decode phase. Each step feeds one token and the previous KV cache.
 
-**Timing method** — CUDA events (`torch.cuda.Event`). `start.record()` and
-`end.record()` bracket each forward pass; `torch.cuda.synchronize()` is called
-after `end.record()` to wait for GPU completion before reading `elapsed_time`.
-This isolates GPU execution time and avoids including CPU-to-GPU synchronization
-overhead inside the measured window.
+**Decode tokens/s** — number of decode steps divided by total decode latency.
+This measures decode-phase throughput and excludes prefill time.
 
-**Warm-up** — the first `warmup_iterations` runs are discarded. They cover
-first-run CUDA kernel compilation and any OS/driver cold-start effects.
-Model loading and tokenizer loading are never included in latency.
+**E2E latency** — sum of prefill latency and all decode step latencies. Excludes
+model loading, tokenization, and CPU overhead between steps.
 
-**Metrics per iteration:** input token count, generated token count, prefill
-latency (ms), decode total latency (ms), per-step mean/median/P95 (ms), decode
-tokens/s, end-to-end latency (ms), peak CUDA allocated and reserved (MB).
+### Timing method
 
-**Summary statistics** across all measured iterations: mean, median, P95, min, max.
+CUDA events (`torch.cuda.Event`) bracket each forward pass. `end.record()` is
+queued immediately after the model call returns; `torch.cuda.synchronize()` then
+waits for GPU completion before `elapsed_time` is read. Synchronization is
+outside the measured interval — the measured time is GPU execution time only.
 
-### Known limitations (small local GPU)
+### Warm-up
 
-- With only 10 measured iterations, P95 equals the maximum (no interpolation).
-- Laptop GPU thermals cause high variance; later iterations can be 1.5× slower
-  than the first due to thermal throttling.
-- Decode throughput (~18–20 tok/s at float16) is memory-bandwidth-limited on a
-  4 GB VRAM GPU; it does not reflect server-grade hardware.
-- `batch_size` is fixed at 1; batched throughput is not measured yet.
+The first `warmup_iterations` runs are discarded. They absorb first-run CUDA
+kernel compilation and driver initialization. Model and tokenizer loading are
+never included in any latency measurement.
+
+---
+
+## Phase 1 Baseline Workloads
+
+Three workloads cover short, medium, and long input lengths at batch size 1.
+
+| Config | Input tokens | Requested output tokens |
+|---|---|---|
+| `phase1_short.yaml` | 30 | 32 |
+| `phase1_medium.yaml` | 117 | 64 |
+| `phase1_long.yaml` | 523 | 100 |
+
+Each run uses 3 warm-up iterations and 10 measured iterations with deterministic
+(greedy) decoding.
+
+```bash
+python scripts/run_benchmark.py --config configs/phase1_short.yaml
+python scripts/run_benchmark.py --config configs/phase1_medium.yaml
+python scripts/run_benchmark.py --config configs/phase1_long.yaml
+```
+
+---
+
+## Aggregate Results to CSV
+
+```bash
+python scripts/aggregate_results.py results/raw/
+```
+
+Or pass specific files:
+
+```bash
+python scripts/aggregate_results.py \
+  results/raw/benchmark_phase1_short_*.json \
+  results/raw/benchmark_phase1_medium_*.json \
+  results/raw/benchmark_phase1_long_*.json
+```
+
+Writes a CSV to `results/processed/summary_<timestamp>.csv`.
+
+---
+
+## Generate Plots
+
+```bash
+python scripts/plot_results.py results/processed/summary_<timestamp>.csv
+```
+
+Produces three PNG files under `results/plots/`:
+
+- `prefill_latency_vs_input_tokens.png`
+- `decode_tokens_per_second_vs_workload.png`
+- `e2e_latency_vs_workload.png`
 
 ---
 
@@ -119,6 +170,23 @@ tokens/s, end-to-end latency (ms), peak CUDA allocated and reserved (MB).
 ```bash
 pytest src_test/
 ```
+
+---
+
+## Known Limitations (RTX 3050 Laptop GPU)
+
+- **Sample size:** With only 10 measured iterations, the P95 estimate is
+  unstable and should be interpreted cautiously. It will equal the maximum
+  observation when n=10.
+- **Latency variance:** Observed run-to-run variance may be caused by laptop GPU
+  thermal behavior, power management, background system activity, or normal
+  runtime variance. Temperature, clock, and power data were not collected.
+- **Throughput:** Decode throughput (~8–18 tok/s at float16 across workloads) is
+  memory-bandwidth-limited on a 4 GB VRAM laptop GPU and does not reflect
+  server-grade hardware.
+- **Batch size:** Fixed at 1; batched throughput is not measured.
+- **Scope:** These results validate the benchmark workflow. They are not
+  representative of production cloud inference capacity.
 
 ---
 
@@ -150,7 +218,10 @@ src/inference_lab/
 scripts/
   run_smoke_inference.py   Quick single-run sanity check
   run_benchmark.py         Full timed benchmark with JSON output
+  aggregate_results.py     Merge JSON files into a summary CSV
+  plot_results.py          Generate PNG plots from CSV
 src_test/                  Unit tests (no model required)
 results/raw/               Timestamped JSON benchmark outputs (git-ignored)
-results/plots/             Generated plots (git-ignored)
+results/processed/         Aggregated CSV files (git-ignored)
+results/plots/             Generated PNG plots (git-ignored)
 ```

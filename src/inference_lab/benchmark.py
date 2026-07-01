@@ -19,10 +19,11 @@ def _timed_forward(model, **kwargs):
     """
     Run one model forward pass and return (outputs, elapsed_ms).
 
-    Timing uses CUDA events so the measured interval is GPU execution time only.
-    torch.cuda.synchronize() is called after end.record() to ensure the GPU has
-    finished before we read the elapsed time — synchronization is NOT inside the
-    measured interval.
+    CUDA events bracket the forward call.  end.record() is queued immediately
+    after the Python call returns (the GPU work is asynchronous), then
+    torch.cuda.synchronize() waits for the GPU to finish before we read
+    elapsed_time.  Synchronization is therefore AFTER the measured interval,
+    not inside it.
     """
     start = torch.cuda.Event(enable_timing=True)
     end = torch.cuda.Event(enable_timing=True)
@@ -34,7 +35,7 @@ def _timed_forward(model, **kwargs):
 
 
 def _run_prefill(model, input_ids, attention_mask):
-    """Forward pass over the full prompt; returns (first_token [1,1], past_kv, ms)."""
+    """Full-prompt forward pass with KV cache. Returns (first_token [1,1], past_kv, ms)."""
     outputs, latency_ms = _timed_forward(
         model,
         input_ids=input_ids,
@@ -48,8 +49,10 @@ def _run_prefill(model, input_ids, attention_mask):
 def _run_decode(model, first_token, past_key_values, max_steps, eos_token_id):
     """
     Decode one token at a time, reusing the KV cache from prefill.
-    Returns (token_id_list, per_step_latency_ms_list).
-    token_id_list includes first_token as element 0.
+
+    Returns:
+        token_ids          - all generated token IDs, starting with first_token
+        step_latencies_ms  - one timing entry per decode forward pass
     """
     token_ids = [first_token.item()]
     step_latencies_ms = []
@@ -83,6 +86,8 @@ def run_single_iteration(model, tokenizer, cfg: InferenceConfig) -> dict:
         attn_mask = attn_mask.to(cfg.device)
     input_token_count = input_ids.shape[1]
 
+    # Reset peak tracking so per-iteration peak reflects only this iteration's
+    # execution (model weights are already resident and counted in the baseline).
     reset_peak_stats()
 
     with torch.inference_mode():
@@ -100,34 +105,35 @@ def run_single_iteration(model, tokenizer, cfg: InferenceConfig) -> dict:
     e2e_ms = prefill_ms + decode_total_ms
 
     if n_decode > 0:
-        decode_mean_ms = statistics.mean(step_latencies_ms)
-        decode_median_ms = statistics.median(step_latencies_ms)
+        mean_decode_ms = statistics.mean(step_latencies_ms)
+        median_decode_ms = statistics.median(step_latencies_ms)
         sorted_steps = sorted(step_latencies_ms)
         p95_idx = min(int(n_decode * 0.95), n_decode - 1)
-        decode_p95_ms = sorted_steps[p95_idx]
+        p95_decode_ms = sorted_steps[p95_idx]
         decode_tps = n_decode / (decode_total_ms / 1000.0)
     else:
-        decode_mean_ms = decode_median_ms = decode_p95_ms = decode_tps = 0.0
+        mean_decode_ms = median_decode_ms = p95_decode_ms = decode_tps = 0.0
 
     return {
-        "input_token_count": input_token_count,
-        "generated_token_count": len(token_ids),
+        "input_tokens": input_token_count,
+        "generated_tokens": len(token_ids),
         "prefill_latency_ms": round(prefill_ms, 3),
         "decode_total_latency_ms": round(decode_total_ms, 3),
-        "decode_mean_token_latency_ms": round(decode_mean_ms, 3),
-        "decode_median_token_latency_ms": round(decode_median_ms, 3),
-        "decode_p95_token_latency_ms": round(decode_p95_ms, 3),
+        "decode_token_latencies_ms": [round(x, 3) for x in step_latencies_ms],
+        "mean_decode_token_latency_ms": round(mean_decode_ms, 3),
+        "median_decode_token_latency_ms": round(median_decode_ms, 3),
+        "p95_decode_token_latency_ms": round(p95_decode_ms, 3),
         "decode_tokens_per_second": round(decode_tps, 3),
         "e2e_latency_ms": round(e2e_ms, 3),
-        "peak_allocated_mb": round(peak_allocated_mb(), 1),
-        "peak_reserved_mb": round(peak_reserved_mb(), 1),
+        "peak_cuda_allocated_mb": round(peak_allocated_mb(), 1),
+        "peak_cuda_reserved_mb": round(peak_reserved_mb(), 1),
     }
 
 
 def run_benchmark(model, tokenizer, cfg: InferenceConfig) -> list[dict]:
     """
-    Run warmup iterations (excluded from results) then measurement iterations.
-    Returns a list of per-iteration result dicts.
+    Run warmup iterations (results discarded) then measurement iterations.
+    Returns a list of per-iteration metric dicts.
     """
     validate_benchmark_config(cfg)
 

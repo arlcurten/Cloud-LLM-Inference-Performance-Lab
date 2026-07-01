@@ -1,17 +1,19 @@
 import statistics
 from typing import Sequence
 
-# Metrics aggregated across benchmark iterations
+# Scalar metrics that are aggregated (mean/median/p95/min/max) across iterations.
+# decode_token_latencies_ms is a list-per-iteration and is excluded from aggregation.
 _AGGREGATE_KEYS = [
     "prefill_latency_ms",
     "decode_total_latency_ms",
-    "decode_mean_token_latency_ms",
-    "decode_median_token_latency_ms",
-    "decode_p95_token_latency_ms",
+    "mean_decode_token_latency_ms",
+    "median_decode_token_latency_ms",
+    "p95_decode_token_latency_ms",
     "decode_tokens_per_second",
     "e2e_latency_ms",
-    "peak_allocated_mb",
-    "peak_reserved_mb",
+    "peak_cuda_allocated_mb",
+    "peak_cuda_reserved_mb",
+    "generated_tokens",
 ]
 
 
@@ -37,7 +39,6 @@ def aggregate_iterations(iterations: list[dict]) -> dict:
     for key in _AGGREGATE_KEYS:
         values = [it[key] for it in iterations]
         summary[key] = compute_stats(values)
-    # Token counts are constant under deterministic generation; report first value.
-    summary["input_token_count"] = iterations[0]["input_token_count"]
-    summary["generated_token_count"] = iterations[0]["generated_token_count"]
+    # input_tokens is constant (it is the input, not generated output).
+    summary["input_tokens"] = iterations[0]["input_tokens"]
     return summary
