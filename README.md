@@ -111,6 +111,29 @@ never included in any latency measurement.
 
 ---
 
+## Phase 1 Baseline Results
+
+Three workloads were benchmarked on the RTX 3050 Laptop GPU (float16, batch size 1,
+greedy decoding, 3 warm-up + 10 measured iterations each).
+
+| Workload | Input tokens | Output tokens | Prefill (mean ms) | Decode tok/s (mean) | E2E (mean ms) | Peak VRAM (MB) |
+|---|---|---|---|---|---|---|
+| short | 30 | 32 | 68.8 | 17.3 | 1868 | 1931 |
+| medium | 117 | 64 | 75.3 | 16.3 | 4034 | 1977 |
+| long | 523 | 100 | 307.0 | 8.7 | 11816 | 2192 |
+
+Full results: [`results/processed/phase1_summary.csv`](results/processed/phase1_summary.csv)
+
+### Plots
+
+![Prefill Latency vs Input Tokens](results/plots/prefill_latency_vs_input_tokens.png)
+
+![Decode Tokens per Second](results/plots/decode_tokens_per_second_vs_workload.png)
+
+![End-to-End Latency](results/plots/e2e_latency_vs_workload.png)
+
+---
+
 ## Phase 1 Baseline Workloads
 
 Three workloads cover short, medium, and long input lengths at batch size 1.

@@ -1,0 +1,4 @@
+experiment_name,model_id,dtype,input_tokens,requested_output_tokens,mean_generated_tokens,mean_prefill_latency_ms,median_prefill_latency_ms,mean_decode_token_latency_ms,median_decode_token_latency_ms,mean_decode_tokens_per_second,mean_e2e_latency_ms,median_e2e_latency_ms,peak_cuda_allocated_mb,peak_cuda_reserved_mb
+phase1_short,google/gemma-3-1b-it,float16,30,32,32,68.768,67.562,58.031,55.968,17.343,1867.715,1803.728,1931.1,1944.0
+phase1_medium,google/gemma-3-1b-it,float16,117,64,64,75.296,71.064,62.84,56.906,16.293,4034.244,3651.209,1977.0,2006.0
+phase1_long,google/gemma-3-1b-it,float16,523,100,100,306.977,302.17,116.255,112.675,8.721,11816.236,11473.535,2191.7,2238.0
