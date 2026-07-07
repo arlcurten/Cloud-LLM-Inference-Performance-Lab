@@ -393,7 +393,7 @@ def test_aggregate_rejects_empty_results():
 
 # ── CSV column completeness ───────────────────────────────────────────────────
 
-def _make_sample_concurrency_doc():
+def _make_sample_concurrency_doc(concurrency_levels=(1, 2)):
     summary_keys = [
         "request_count", "success_count", "failure_count", "failure_rate",
         "ttft_mean_ms", "ttft_median_ms", "ttft_p95_ms", "ttft_p99_ms",
@@ -408,8 +408,8 @@ def _make_sample_concurrency_doc():
         "metadata": {"timestamp": "2026-01-01T00:00:00+00:00"},
         "configuration": {"prompt": "p", "max_tokens": 32},
         "experiments": [
-            {"concurrency": 1, "raw_requests": [], "summary": summary},
-            {"concurrency": 2, "raw_requests": [], "summary": summary},
+            {"concurrency": c, "raw_requests": [], "summary": dict(summary)}
+            for c in concurrency_levels
         ],
     }
 
@@ -443,3 +443,130 @@ def test_experiment_entry_has_required_keys():
         assert "concurrency" in experiment
         assert "raw_requests" in experiment
         assert "summary" in experiment
+
+
+# ── extended concurrency sweep (saturation study: 1, 2, 4, 6, 8) ─────────────
+
+def test_validate_concurrency_config_accepts_extended_levels():
+    cfg = ConcurrencyBenchmarkConfig(
+        server_url="http://x", model_id="m", prompt="p",
+        concurrency_levels=[1, 2, 4, 6, 8],
+    )
+    validate_concurrency_config(cfg)  # should not raise
+
+
+def test_extract_rows_covers_five_concurrency_levels():
+    doc = _make_sample_concurrency_doc([1, 2, 4, 6, 8])
+    rows = agg_cli.extract_rows(doc)
+    assert [r["concurrency"] for r in rows] == [1, 2, 4, 6, 8]
+    for row in rows:
+        for col in agg_cli.CSV_COLUMNS:
+            assert col in row, f"Missing CSV column: {col}"
+
+
+def test_aggregate_zero_success_level_does_not_crash():
+    # An entire concurrency level with no successful requests (e.g. all timed out).
+    results = [_make_result(None, 30000.0, None, success=False, error_type="timeout") for _ in range(5)]
+    summary = aggregate_concurrency_results(results, duration_seconds=30.0)
+    assert summary["request_count"] == 5
+    assert summary["success_count"] == 0
+    assert summary["failure_count"] == 5
+    assert summary["failure_rate"] == pytest.approx(1.0)
+    assert summary["ttft_mean_ms"] is None
+    assert summary["e2e_mean_ms"] is None
+    assert summary["approx_tpot_mean_ms"] is None
+    assert summary["mean_completion_tokens"] is None
+    assert summary["request_throughput_rps"] == pytest.approx(0.0)
+    assert summary["output_token_throughput_tps"] == pytest.approx(0.0)
+
+
+# ── relative-scaling (saturation) calculations ───────────────────────────────
+
+def test_ratio_basic():
+    assert agg_cli._ratio(20.0, 10.0) == pytest.approx(2.0)
+
+
+def test_ratio_zero_baseline_returns_blank():
+    assert agg_cli._ratio(20.0, 0.0) == ""
+
+
+def test_ratio_non_numeric_returns_blank():
+    assert agg_cli._ratio("", 10.0) == ""
+    assert agg_cli._ratio(10.0, "") == ""
+
+
+def test_add_relative_scaling_baseline_is_one():
+    rows = [
+        {"concurrency": 1, "output_token_throughput_tps": 70.0, "ttft_median_ms": 30.0, "e2e_median_ms": 300.0},
+        {"concurrency": 4, "output_token_throughput_tps": 210.0, "ttft_median_ms": 45.0, "e2e_median_ms": 450.0},
+    ]
+    result = agg_cli.add_relative_scaling(rows)
+    baseline_row = result[0]
+    assert baseline_row["throughput_scaling_vs_c1"] == pytest.approx(1.0)
+    assert baseline_row["ttft_median_increase_vs_c1"] == pytest.approx(1.0)
+    assert baseline_row["e2e_median_increase_vs_c1"] == pytest.approx(1.0)
+
+
+def test_add_relative_scaling_reflects_saturation():
+    # Throughput only doubles (not 4x) while latency triples -> scaling < concurrency ratio.
+    rows = [
+        {"concurrency": 1, "output_token_throughput_tps": 70.0, "ttft_median_ms": 30.0, "e2e_median_ms": 300.0},
+        {"concurrency": 4, "output_token_throughput_tps": 140.0, "ttft_median_ms": 90.0, "e2e_median_ms": 900.0},
+    ]
+    result = agg_cli.add_relative_scaling(rows)
+    saturated_row = result[1]
+    assert saturated_row["throughput_scaling_vs_c1"] == pytest.approx(2.0)
+    assert saturated_row["ttft_median_increase_vs_c1"] == pytest.approx(3.0)
+    assert saturated_row["e2e_median_increase_vs_c1"] == pytest.approx(3.0)
+    # Latency growing faster than throughput is the saturation signal readers should look for.
+    assert saturated_row["e2e_median_increase_vs_c1"] > saturated_row["throughput_scaling_vs_c1"]
+
+
+def test_add_relative_scaling_missing_baseline_leaves_blank():
+    rows = [
+        {"concurrency": 2, "output_token_throughput_tps": 100.0, "ttft_median_ms": 40.0, "e2e_median_ms": 400.0},
+    ]
+    result = agg_cli.add_relative_scaling(rows)
+    assert result[0]["throughput_scaling_vs_c1"] == ""
+    assert result[0]["ttft_median_increase_vs_c1"] == ""
+    assert result[0]["e2e_median_increase_vs_c1"] == ""
+
+
+# ── plot generation across the extended sweep ────────────────────────────────
+
+def test_plot_all_covers_five_concurrency_levels(tmp_path):
+    import plot_concurrency_results as plot_cli
+
+    csv_path = tmp_path / "phase2_concurrency_summary.csv"
+    header = plot_cli.REQUIRED_PLOT_COLS
+    rows = []
+    for i, c in enumerate([1, 2, 4, 6, 8]):
+        rows.append(
+            {
+                "concurrency": c,
+                "ttft_median_ms": 30.0 + i * 2,
+                "ttft_p95_ms": 32.0 + i * 2,
+                "e2e_median_ms": 300.0 + i * 20,
+                "e2e_p95_ms": 320.0 + i * 20,
+                "request_throughput_rps": 3.0 + i,
+                "output_token_throughput_tps": 70.0 + i * 10,
+            }
+        )
+    import csv as csv_module
+    with open(csv_path, "w", newline="") as f:
+        writer = csv_module.DictWriter(f, fieldnames=header)
+        writer.writeheader()
+        writer.writerows(rows)
+
+    out_dir = tmp_path / "plots"
+    paths = plot_cli.plot_all(csv_path, out_dir)
+    assert len(paths) == 4
+    names = {p.name for p in paths}
+    assert names == {
+        "phase2_ttft_vs_concurrency.png",
+        "phase2_e2e_vs_concurrency.png",
+        "phase2_throughput_vs_concurrency.png",
+        "phase2_latency_throughput_tradeoff.png",
+    }
+    for p in paths:
+        assert p.exists()

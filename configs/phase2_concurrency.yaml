@@ -8,7 +8,11 @@ prompt: "What is the capital of France?"
 max_tokens: 32
 temperature: 0
 stream: true
-concurrency_levels: [1, 2, 4]
+# Levels 6 and 8 intentionally exceed the server's max_num_seqs=4
+# (configs/phase2_vllm_local.yaml) to study client-observed queueing and
+# throughput saturation once client concurrency outpaces server scheduling
+# capacity. max_num_seqs is not changed for this sweep.
+concurrency_levels: [1, 2, 4, 6, 8]
 requests_per_level: 30
 request_timeout_seconds: 30
 warmup_requests: 3

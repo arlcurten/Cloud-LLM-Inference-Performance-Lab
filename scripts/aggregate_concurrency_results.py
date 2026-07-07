@@ -31,6 +31,9 @@ CSV_COLUMNS = [
     "output_token_throughput_tps",
     "mean_completion_tokens",
     "benchmark_duration_seconds",
+    "throughput_scaling_vs_c1",
+    "ttft_median_increase_vs_c1",
+    "e2e_median_increase_vs_c1",
 ]
 
 
@@ -39,16 +42,60 @@ def _load_json(path: Path) -> dict:
         return json.load(f)
 
 
+_SUMMARY_COLUMNS = [c for c in CSV_COLUMNS if not c.endswith("_vs_c1")]
+
+
 def extract_rows(doc: dict) -> list[dict]:
     rows = []
     for experiment in doc["experiments"]:
         summary = experiment["summary"]
         row = {"concurrency": experiment["concurrency"]}
-        for col in CSV_COLUMNS:
+        for col in _SUMMARY_COLUMNS:
             if col == "concurrency":
                 continue
             row[col] = summary.get(col, "")
         rows.append(row)
+    return add_relative_scaling(rows)
+
+
+def _ratio(current, base):
+    """Simple current/base ratio (e.g. 2.5 means 2.5x the baseline value).
+
+    Not a saturation classifier — just a relative-scaling number for the
+    CSV/report to read directly.
+    """
+    try:
+        current = float(current)
+        base = float(base)
+    except (TypeError, ValueError):
+        return ""
+    if base == 0:
+        return ""
+    return round(current / base, 4)
+
+
+def add_relative_scaling(rows: list[dict]) -> list[dict]:
+    """Add throughput/latency ratios relative to the concurrency=1 row.
+
+    Requires rows to include a concurrency=1 entry; if absent, the new
+    columns are left blank (no baseline to compare against).
+    """
+    baseline = next((r for r in rows if r["concurrency"] == 1), None)
+    for row in rows:
+        if baseline is None:
+            row["throughput_scaling_vs_c1"] = ""
+            row["ttft_median_increase_vs_c1"] = ""
+            row["e2e_median_increase_vs_c1"] = ""
+            continue
+        row["throughput_scaling_vs_c1"] = _ratio(
+            row.get("output_token_throughput_tps"), baseline.get("output_token_throughput_tps")
+        )
+        row["ttft_median_increase_vs_c1"] = _ratio(
+            row.get("ttft_median_ms"), baseline.get("ttft_median_ms")
+        )
+        row["e2e_median_increase_vs_c1"] = _ratio(
+            row.get("e2e_median_ms"), baseline.get("e2e_median_ms")
+        )
     return rows
 
 

@@ -103,6 +103,17 @@ def plot_all(csv_path: Path, out_dir: Path) -> list[Path]:
     ax1.grid(axis="y", linestyle="--", alpha=0.5)
     _save(fig, "phase2_throughput_vs_concurrency.png")
 
+    # 4. Latency vs throughput tradeoff: aggregate output tokens/s vs median E2E latency
+    fig, ax = plt.subplots(figsize=(7, 4))
+    ax.plot(output_tps, e2e_median, marker="o")
+    for c, x, y in zip(concurrency, output_tps, e2e_median):
+        ax.annotate(f"c={int(c)}", (x, y), textcoords="offset points", xytext=(6, 4), fontsize=8)
+    ax.set_xlabel("Aggregate Output Tokens/s")
+    ax.set_ylabel("Median E2E Latency (ms)")
+    ax.set_title("Latency vs Throughput Tradeoff")
+    ax.grid(linestyle="--", alpha=0.5)
+    _save(fig, "phase2_latency_throughput_tradeoff.png")
+
     return generated_paths
 
 
