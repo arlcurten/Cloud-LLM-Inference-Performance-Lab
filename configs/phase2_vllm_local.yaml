@@ -1,0 +1,10 @@
+# Phase 2A: local vLLM OpenAI-compatible server configuration.
+# Conservative values chosen for a 4 GB VRAM laptop GPU (RTX 3050 Laptop).
+model_id: models/google/gemma-3-1b-it
+host: 127.0.0.1
+port: 8000
+dtype: bfloat16
+max_model_len: 2048
+gpu_memory_utilization: 0.75
+max_num_seqs: 4
+seed: 42

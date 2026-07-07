@@ -225,6 +225,9 @@ __marimo__/
 # Local model downloads
 models/
 
+# Isolated vLLM virtual environment (Phase 2)
+.venv-vllm/
+
 # Project results — raw JSON and timestamped files are ignored
 results/raw/*
 results/processed/*
