@@ -246,3 +246,4 @@ results/plots/*
 !results/plots/phase2_ttft_vs_concurrency.png
 !results/plots/phase2_e2e_vs_concurrency.png
 !results/plots/phase2_throughput_vs_concurrency.png
+!results/plots/phase2_latency_throughput_tradeoff.png

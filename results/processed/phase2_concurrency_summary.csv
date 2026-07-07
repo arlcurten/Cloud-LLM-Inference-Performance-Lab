@@ -1,4 +1,6 @@
-concurrency,request_count,success_count,failure_count,failure_rate,ttft_mean_ms,ttft_median_ms,ttft_p95_ms,ttft_p99_ms,approx_tpot_mean_ms,approx_tpot_median_ms,e2e_mean_ms,e2e_median_ms,e2e_p95_ms,e2e_p99_ms,request_throughput_rps,output_token_throughput_tps,mean_completion_tokens,benchmark_duration_seconds
-1,30,30,0,0.0,31.043,31.098,32.385,32.796,13.571,13.565,316.03,316.15,317.823,318.111,3.1628,69.582,22,9.4852
-2,30,30,0,0.0,34.883,34.484,37.745,38.118,15.251,15.081,355.164,351.424,365.375,365.433,5.6262,123.776,22,5.3322
-4,30,30,0,0.0,37.419,37.1,44.261,44.424,17.343,16.644,401.617,386.747,448.416,448.602,9.2581,203.6789,22,3.2404
+concurrency,request_count,success_count,failure_count,failure_rate,ttft_mean_ms,ttft_median_ms,ttft_p95_ms,ttft_p99_ms,approx_tpot_mean_ms,approx_tpot_median_ms,e2e_mean_ms,e2e_median_ms,e2e_p95_ms,e2e_p99_ms,request_throughput_rps,output_token_throughput_tps,mean_completion_tokens,benchmark_duration_seconds,throughput_scaling_vs_c1,ttft_median_increase_vs_c1,e2e_median_increase_vs_c1
+1,30,30,0,0.0,31.779,31.85,33.189,33.363,13.612,13.595,317.624,317.181,320.854,321.74,3.1469,69.2308,22,9.5333,1.0,1.0,1.0
+2,30,30,0,0.0,36.003,35.57,41.832,42.095,15.881,15.82,369.511,368.034,420.068,420.151,5.4074,118.9623,22,5.548,1.7183,1.1168,1.1603
+4,30,30,0,0.0,37.924,38.052,40.741,41.25,17.447,17.901,404.317,410.979,431.874,432.133,9.2227,202.8989,22,3.2529,2.9308,1.1947,1.2957
+6,30,30,0,0.0,245.046,64.367,473.187,485.961,18.776,18.771,639.336,459.542,866.225,880.603,8.5907,188.9953,22,3.4922,2.7299,2.0209,1.4488
+8,30,30,0,0.0,417.919,471.301,491.064,491.592,18.737,18.751,811.396,865.709,884.821,885.928,8.6162,189.5558,22,3.4818,2.738,14.7975,2.7294

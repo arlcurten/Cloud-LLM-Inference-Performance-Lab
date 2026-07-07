@@ -415,9 +415,11 @@ python scripts/run_concurrency_benchmark.py --config configs/phase2_concurrency.
 Reads `configs/phase2_concurrency.yaml`. The same prompt, `max_tokens`,
 `temperature`, and streaming mode are used across every concurrency level
 so results are comparable to each other. Before running, the script prints
-the live server's configured `max_num_seqs` — concurrency levels above that
-value are not meaningfully testable (the server itself would queue beyond
-that limit).
+the live server's configured `max_num_seqs`. Concurrency levels at or below
+`max_num_seqs` measure the server's normal scheduling behavior; levels
+*above* `max_num_seqs` are used deliberately in the saturation study below
+to observe client-side queueing effects once client concurrency exceeds
+what the server can actively schedule.
 
 ### Generate CSV and plots
 
@@ -427,26 +429,34 @@ python scripts/plot_concurrency_results.py results/processed/phase2_concurrency_
 ```
 
 Produces `results/processed/phase2_concurrency_summary.csv` (one row per
-concurrency level) and three PNGs under `results/plots/`:
+concurrency level) and four PNGs under `results/plots/`:
 
 - `phase2_ttft_vs_concurrency.png`
 - `phase2_e2e_vs_concurrency.png`
 - `phase2_throughput_vs_concurrency.png`
+- `phase2_latency_throughput_tradeoff.png`
 
 ### Phase 2B Results (RTX 3050 Laptop, 4 GB VRAM)
 
-Concurrency levels 1, 2, and 4 against `google/gemma-3-1b-it`, 30 measured
-requests per level (3 warm-up requests discarded), identical prompt,
-`max_tokens=32`, `temperature=0`, streaming enabled, `max_num_seqs=4` on the
-server (so concurrency 4 is the highest level meaningfully testable here).
+Concurrency levels 1, 2, 4, 6, and 8 against `google/gemma-3-1b-it`, all
+run in a single controlled session (same server process throughout), 30
+measured requests per level (3 warm-up requests discarded before each
+level), identical prompt, `max_tokens=32`, `temperature=0`, streaming
+enabled, `max_num_seqs=4` on the server — **unchanged** for this study.
+Levels 6 and 8 intentionally exceed `max_num_seqs` to study saturation.
 
-| Concurrency | Success/Fail | TTFT median/P95/P99 (ms) | approx TPOT median/P95 (ms) | E2E median/P95/P99 (ms) | Req/s | Output tok/s |
-|---|---|---|---|---|---|---|
-| 1 | 30/0 | 31.1 / 32.4 / 32.8 | 13.6 / 13.7 | 316.2 / 317.8 / 318.1 | 3.16 | 69.6 |
-| 2 | 30/0 | 34.5 / 37.7 / 38.1 | 15.1 / 15.8 | 351.4 / 365.4 / 365.4 | 5.63 | 123.8 |
-| 4 | 30/0 | 37.1 / 44.3 / 44.4 | 16.6 / 19.4 | 386.7 / 448.4 / 448.6 | 9.26 | 203.7 |
+| Concurrency | Success/Fail | TTFT median/P95/P99 (ms) | approx TPOT median/P95 (ms) | E2E median/P95/P99 (ms) | Req/s | Output tok/s | Throughput scaling vs c=1 |
+|---|---|---|---|---|---|---|---|
+| 1 | 30/0 | 31.9 / 33.2 / 33.4 | 13.6 / 13.7 | 317.2 / 320.9 / 321.7 | 3.15 | 69.2 | 1.00x |
+| 2 | 30/0 | 35.6 / 41.8 / 42.1 | 15.8 / 18.1 | 368.0 / 420.1 / 420.2 | 5.41 | 119.0 | 1.72x |
+| 4 | 30/0 | 38.1 / 40.7 / 41.3 | 17.9 / 18.6 | 411.0 / 431.9 / 432.1 | 9.22 | 202.9 | 2.93x |
+| 6 | 30/0 | 64.4 / 473.2 / 486.0 | 18.8 / 19.0 | 459.5 / 866.2 / 880.6 | 8.59 | 189.0 | 2.73x |
+| 8 | 30/0 | 471.3 / 491.1 / 491.6 | 18.8 / 18.9 | 865.7 / 884.8 / 885.9 | 8.62 | 189.6 | 2.74x |
 
 Full results: [`results/processed/phase2_concurrency_summary.csv`](results/processed/phase2_concurrency_summary.csv)
+(includes `throughput_scaling_vs_c1`, `ttft_median_increase_vs_c1`, and
+`e2e_median_increase_vs_c1` — simple current/concurrency-1 ratios, not a
+saturation classifier)
 
 ![TTFT vs Concurrency](results/plots/phase2_ttft_vs_concurrency.png)
 
@@ -454,28 +464,70 @@ Full results: [`results/processed/phase2_concurrency_summary.csv`](results/proce
 
 ![Throughput vs Concurrency](results/plots/phase2_throughput_vs_concurrency.png)
 
-Zero request failures across all 90 measured requests (30 × 3 levels).
+![Latency vs Throughput Tradeoff](results/plots/phase2_latency_throughput_tradeoff.png)
+
+Zero request failures across all 150 measured requests (30 × 5 levels).
 GPU memory held steady at ~3.8 GB (of 4 GB) throughout, including at
-concurrency 4. Both latency (TTFT and E2E, median and P95) and throughput
-(requests/s and output tokens/s) increase together with concurrency — the
-server is doing more useful work per second at higher concurrency, at the
-cost of higher per-request latency, consistent with request batching in
-vLLM's continuous scheduler rather than resource contention or instability.
+concurrency 8 — no OOM at any level.
+
+### Saturation study: concurrency beyond `max_num_seqs`
+
+`max_num_seqs` stayed fixed at 4 for this entire sweep — it was not
+increased. From concurrency 1 to 4, throughput and latency both scale up
+roughly together (throughput reaches 2.93x the concurrency-1 rate by
+concurrency 4). At concurrency 6 and 8 — both **above** `max_num_seqs=4` —
+a clear pattern emerges instead:
+
+- **Throughput plateaus.** Output tokens/s actually *drops slightly* from
+  202.9 (concurrency 4) to 189.0-189.6 (concurrency 6 and 8) — additional
+  client concurrency beyond the server's `max_num_seqs` produces no further
+  throughput gain.
+- **Latency grows sharply and disproportionately.** Median TTFT jumps from
+  38 ms (concurrency 4) to 64 ms (concurrency 6) to 471 ms (concurrency 8)
+  — a ~12x increase from concurrency 4 to 8, while throughput is flat to
+  slightly down over the same range. Median E2E latency roughly doubles
+  from concurrency 4 to 8 (411 ms → 866 ms).
+
+This pattern — latency rising steeply while throughput stays flat or
+declines — is consistent with requests **queueing** once client concurrency
+exceeds `max_num_seqs`: extra in-flight requests must wait for one of the
+server's 4 actively-scheduled sequence slots to free up before they are
+processed at all, inflating client-observed TTFT and E2E latency without
+increasing completed work per second.
+
+**Important caveat:** this is an *inferred* queueing effect from
+client-side timing, not a direct measurement of server-side queue depth or
+wait time. vLLM does not expose per-request queue-wait metrics through the
+OpenAI-compatible API used here; a direct measurement would require
+server-side instrumentation (e.g. Prometheus metrics), which is out of
+scope for this phase. The client can only observe that total latency grew
+far more than completed work did — that is evidence consistent with
+queueing, not proof of a specific queue-wait duration.
+
+One benign warning appeared once in the server log during this run:
+`Triton kernel JIT compilation during inference: _compute_slot_mapping_kernel.
+This causes a latency spike; consider extending warmup to cover this
+shape/config.` — a one-time JIT compile for a batch shape not seen during
+warmup. It occurred early in the sweep and does not affect the reported
+per-level statistics (each level's own warm-up requests are discarded
+before measurement begins).
 
 ### Why these results validate the workflow, not cloud serving capacity
 
-All three concurrency levels ran against the *same* local RTX 3050 Laptop
+All five concurrency levels ran against the *same* local RTX 3050 Laptop
 GPU process — a single 4 GB card with `max_num_seqs=4` and a 2048-token
 context cap. This confirms the closed-loop benchmark harness, metric
-definitions, and aggregation pipeline all work correctly end-to-end. It
-does not indicate what throughput or latency this model would achieve on
-server-grade hardware (e.g. an A10G/A100 in the cloud), which would support
-far higher `max_num_seqs`, larger `gpu_memory_utilization` headroom, and
-different batching behavior. Phase 2A's single-request smoke-test numbers
-are also not directly comparable to these Phase 2B numbers, since Phase 2A
-used a different prompt/config run at a different time — only results
-produced under identical prompt/config/methodology (as within this Phase
-2B table) should be compared to each other.
+definitions, aggregation pipeline, and saturation-detection logic all work
+correctly end-to-end, and that the queueing pattern above `max_num_seqs` is
+a real, reproducible signal — not an artifact of the harness. It does not
+indicate what throughput, latency, or maximum concurrency this model would
+achieve on server-grade hardware (e.g. an A10G/A100 in the cloud with a
+much higher `max_num_seqs` and more VRAM headroom). Phase 2A's
+single-request smoke-test numbers are also not directly comparable to
+these Phase 2B numbers, since Phase 2A used a different prompt/config run
+at a different time — only results produced under identical
+prompt/config/methodology (as within this Phase 2B table) should be
+compared to each other.
 
 ---
 
