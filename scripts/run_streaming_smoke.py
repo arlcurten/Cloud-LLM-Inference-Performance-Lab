@@ -12,46 +12,17 @@ instead of exact inter-token latency (TPOT). Do not treat these as exact
 per-token measurements.
 """
 import argparse
-import json
 import sys
 import time
+from pathlib import Path
 
 import requests
 
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+
+from inference_lab.online_benchmark import parse_sse_line, extract_text_delta
+
 from run_online_smoke import build_url, check_server_reachable
-
-
-def parse_sse_line(line: str):
-    """Parse one SSE line from an OpenAI-compatible streaming response.
-
-    Returns the decoded JSON payload dict, or None for blank lines,
-    non-data lines, or the terminal "[DONE]" marker.
-    """
-    if not line:
-        return None
-    if not line.startswith("data:"):
-        return None
-    data = line[len("data:"):].strip()
-    if data == "[DONE]":
-        return None
-    return json.loads(data)
-
-
-def extract_text_delta(chunk: dict) -> str:
-    """Extract the text delta from a streaming chunk.
-
-    Supports both /v1/completions ("text") and /v1/chat/completions
-    ("delta.content") response shapes. Returns "" if there is no
-    content delta in this chunk (e.g. a role-only chat delta).
-    """
-    choices = chunk.get("choices") or []
-    if not choices:
-        return ""
-    choice = choices[0]
-    if "text" in choice:
-        return choice.get("text") or ""
-    delta = choice.get("delta") or {}
-    return delta.get("content") or ""
 
 
 def compute_streaming_metrics(request_start: float, chunk_times: list) -> dict:

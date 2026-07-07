@@ -1,0 +1,15 @@
+# Phase 2B: async closed-loop concurrency benchmark configuration.
+# Conservative defaults for a 4 GB VRAM laptop GPU (RTX 3050 Laptop).
+# The same prompt and generation parameters are used across all concurrency
+# levels so results are comparable to each other.
+server_url: http://127.0.0.1:8000
+model_id: models/google/gemma-3-1b-it
+prompt: "What is the capital of France?"
+max_tokens: 32
+temperature: 0
+stream: true
+concurrency_levels: [1, 2, 4]
+requests_per_level: 30
+request_timeout_seconds: 30
+warmup_requests: 3
+seed: 42

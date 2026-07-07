@@ -1,0 +1,4 @@
+concurrency,request_count,success_count,failure_count,failure_rate,ttft_mean_ms,ttft_median_ms,ttft_p95_ms,ttft_p99_ms,approx_tpot_mean_ms,approx_tpot_median_ms,e2e_mean_ms,e2e_median_ms,e2e_p95_ms,e2e_p99_ms,request_throughput_rps,output_token_throughput_tps,mean_completion_tokens,benchmark_duration_seconds
+1,30,30,0,0.0,31.043,31.098,32.385,32.796,13.571,13.565,316.03,316.15,317.823,318.111,3.1628,69.582,22,9.4852
+2,30,30,0,0.0,34.883,34.484,37.745,38.118,15.251,15.081,355.164,351.424,365.375,365.433,5.6262,123.776,22,5.3322
+4,30,30,0,0.0,37.419,37.1,44.261,44.424,17.343,16.644,401.617,386.747,448.416,448.602,9.2581,203.6789,22,3.2404

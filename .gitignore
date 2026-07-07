@@ -241,3 +241,8 @@ results/plots/*
 !results/plots/prefill_latency_vs_input_tokens.png
 !results/plots/decode_tokens_per_second_vs_workload.png
 !results/plots/e2e_latency_vs_workload.png
+# Keep representative Phase 2B results for GitHub visibility
+!results/processed/phase2_concurrency_summary.csv
+!results/plots/phase2_ttft_vs_concurrency.png
+!results/plots/phase2_e2e_vs_concurrency.png
+!results/plots/phase2_throughput_vs_concurrency.png

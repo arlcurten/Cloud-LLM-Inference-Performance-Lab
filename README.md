@@ -346,15 +346,136 @@ comparison meaningful.
 
 ### Local 4 GB GPU limitations
 
-- Single in-flight request only was exercised in this smoke test
-  (`max_num_seqs: 4` is configured but concurrency is untested until
-  Phase 2B).
+- This Phase 2A smoke test exercised a single in-flight request only;
+  concurrency is measured in Phase 2B below.
 - `max_model_len` is deliberately capped well below the model's native
   context window to control KV cache memory on a 4 GB card.
 - `gpu_memory_utilization` and `max_num_seqs` are conservative starting
   values, not tuned for maximum throughput.
 - Startup itself (CUDA graph capture, `torch.compile`) takes ~15-20 s and
   briefly uses additional VRAM beyond steady-state serving.
+
+---
+
+## Phase 2B: Async Closed-Loop Concurrency Benchmark
+
+Phase 2A confirmed the serving path works for one request at a time. Phase
+2B measures how latency and throughput change as multiple requests run
+concurrently against the same server — still bounded to local 4 GB VRAM
+concurrency, not a full production load test.
+
+### Closed-loop concurrency, not open-loop request rate
+
+This benchmark uses a **closed-loop** load model: for concurrency level *N*,
+exactly *N* worker tasks run continuously, each sending one request and
+immediately sending its next request as soon as the previous one finishes.
+The number of requests **in flight** never exceeds *N*.
+
+This is different from **open-loop** load generation, where requests are
+issued on an independent schedule (e.g. a fixed arrival rate) regardless of
+how quickly the server responds — a real client population usually behaves
+more like an open-loop model, and closed-loop benchmarks can understate
+tail latency under sustained load. Open-loop arrival-rate control is
+explicitly out of scope for Phase 2B; see `run_closed_loop` in
+`src/inference_lab/online_benchmark.py`.
+
+### Metric definitions
+
+- **TTFT (`ttft_ms`)** — time from immediately before sending the HTTP
+  request until the first *non-empty* generated text chunk arrives.
+  Metadata-only or empty chunks (e.g. a final usage-only chunk) are not
+  treated as the first token.
+- **`approx_tpot_ms`** — approximate client-side time-per-output-token,
+  computed only when `completion_tokens > 1`:
+  `(e2e_latency_ms - ttft_ms) / (completion_tokens - 1)`. This is **not**
+  exact server-side per-token latency — the OpenAI streaming protocol
+  exposes text chunks, not individual model tokens, and a chunk may
+  contain zero, one, or more tokens.
+- **E2E latency (`e2e_latency_ms`)** — time from immediately before sending
+  the request until the stream fully completes.
+- **Request throughput** — `successful requests / benchmark wall-clock
+  duration`, per concurrency level.
+- **Aggregate output token throughput** — `total completion tokens (across
+  all successful requests) / benchmark wall-clock duration`. This is
+  *aggregate* server-side throughput, not an average of individual
+  requests' per-request `output_tokens_per_second` values — averaging
+  per-request throughput would not equal the server's actual combined
+  output rate under concurrency.
+
+P99 is reported per concurrency level but is only **provisional** with 30
+requests per level — a small sample for tail-latency estimation.
+
+### Start the server and run the benchmark
+
+```bash
+bash scripts/start_vllm_server.sh
+python scripts/run_concurrency_benchmark.py --config configs/phase2_concurrency.yaml
+```
+
+Reads `configs/phase2_concurrency.yaml`. The same prompt, `max_tokens`,
+`temperature`, and streaming mode are used across every concurrency level
+so results are comparable to each other. Before running, the script prints
+the live server's configured `max_num_seqs` — concurrency levels above that
+value are not meaningfully testable (the server itself would queue beyond
+that limit).
+
+### Generate CSV and plots
+
+```bash
+python scripts/aggregate_concurrency_results.py results/raw/concurrency_benchmark_<timestamp>.json
+python scripts/plot_concurrency_results.py results/processed/phase2_concurrency_summary.csv
+```
+
+Produces `results/processed/phase2_concurrency_summary.csv` (one row per
+concurrency level) and three PNGs under `results/plots/`:
+
+- `phase2_ttft_vs_concurrency.png`
+- `phase2_e2e_vs_concurrency.png`
+- `phase2_throughput_vs_concurrency.png`
+
+### Phase 2B Results (RTX 3050 Laptop, 4 GB VRAM)
+
+Concurrency levels 1, 2, and 4 against `google/gemma-3-1b-it`, 30 measured
+requests per level (3 warm-up requests discarded), identical prompt,
+`max_tokens=32`, `temperature=0`, streaming enabled, `max_num_seqs=4` on the
+server (so concurrency 4 is the highest level meaningfully testable here).
+
+| Concurrency | Success/Fail | TTFT median/P95/P99 (ms) | approx TPOT median/P95 (ms) | E2E median/P95/P99 (ms) | Req/s | Output tok/s |
+|---|---|---|---|---|---|---|
+| 1 | 30/0 | 31.1 / 32.4 / 32.8 | 13.6 / 13.7 | 316.2 / 317.8 / 318.1 | 3.16 | 69.6 |
+| 2 | 30/0 | 34.5 / 37.7 / 38.1 | 15.1 / 15.8 | 351.4 / 365.4 / 365.4 | 5.63 | 123.8 |
+| 4 | 30/0 | 37.1 / 44.3 / 44.4 | 16.6 / 19.4 | 386.7 / 448.4 / 448.6 | 9.26 | 203.7 |
+
+Full results: [`results/processed/phase2_concurrency_summary.csv`](results/processed/phase2_concurrency_summary.csv)
+
+![TTFT vs Concurrency](results/plots/phase2_ttft_vs_concurrency.png)
+
+![E2E Latency vs Concurrency](results/plots/phase2_e2e_vs_concurrency.png)
+
+![Throughput vs Concurrency](results/plots/phase2_throughput_vs_concurrency.png)
+
+Zero request failures across all 90 measured requests (30 × 3 levels).
+GPU memory held steady at ~3.8 GB (of 4 GB) throughout, including at
+concurrency 4. Both latency (TTFT and E2E, median and P95) and throughput
+(requests/s and output tokens/s) increase together with concurrency — the
+server is doing more useful work per second at higher concurrency, at the
+cost of higher per-request latency, consistent with request batching in
+vLLM's continuous scheduler rather than resource contention or instability.
+
+### Why these results validate the workflow, not cloud serving capacity
+
+All three concurrency levels ran against the *same* local RTX 3050 Laptop
+GPU process — a single 4 GB card with `max_num_seqs=4` and a 2048-token
+context cap. This confirms the closed-loop benchmark harness, metric
+definitions, and aggregation pipeline all work correctly end-to-end. It
+does not indicate what throughput or latency this model would achieve on
+server-grade hardware (e.g. an A10G/A100 in the cloud), which would support
+far higher `max_num_seqs`, larger `gpu_memory_utilization` headroom, and
+different batching behavior. Phase 2A's single-request smoke-test numbers
+are also not directly comparable to these Phase 2B numbers, since Phase 2A
+used a different prompt/config run at a different time — only results
+produced under identical prompt/config/methodology (as within this Phase
+2B table) should be compared to each other.
 
 ---
 
@@ -373,14 +494,18 @@ src/inference_lab/
   system_info.py           Environment metadata collection
   server_config.py         Phase 2 server config dataclass and YAML loader
   server_info.py           Phase 2 server metadata capture (vLLM/torch/CUDA/GPU)
+  online_benchmark.py      Phase 2B closed-loop concurrency benchmark logic
 scripts/
   run_smoke_inference.py   Quick single-run sanity check
   run_benchmark.py         Full timed benchmark with JSON output
   aggregate_results.py     Merge JSON files into a summary CSV
   plot_results.py          Generate PNG plots from CSV
   start_vllm_server.sh     Start the Phase 2 vLLM OpenAI-compatible server
-  run_online_smoke.py      Phase 2 non-streaming online inference client
-  run_streaming_smoke.py   Phase 2 streaming online inference client
+  run_online_smoke.py      Phase 2A non-streaming online inference client
+  run_streaming_smoke.py   Phase 2A streaming online inference client
+  run_concurrency_benchmark.py       Phase 2B async closed-loop load generator
+  aggregate_concurrency_results.py   Concurrency JSON -> summary CSV
+  plot_concurrency_results.py        Generate PNG plots from concurrency CSV
 src_test/                  Unit tests (no model or server required)
 results/raw/               Timestamped JSON benchmark outputs (git-ignored)
 results/processed/         Aggregated CSV files (git-ignored)
